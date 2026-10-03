@@ -1,19 +1,4 @@
-// Enums para el movimiento del motor
-enum Motores {
-    //% block="A"
-    M1 = 1,
-    //% block="B"
-    M2 = 2
-}
-
-enum Direccion {
-    //% block="Adelante"
-    Adelante = 0,
-    //% block="Atrás"
-    Atras = 1
-}
-
-// Enums nativos del control Keyestudio (Estilo MakerBit)
+// Enums nativos del control Keyestudio (Con espacios restaurados para la cuadrícula)
 enum IrButton {
     //% block="any"
     Any = -1,
@@ -69,8 +54,7 @@ enum IrButtonAction {
 //% color="#AA278D" icon="\uf1b9" block="Keyestudio Robot"
 namespace keyestudioRobot {
 
-    // --- LÓGICA DE BAJO NIVEL: MOTORES E I2C ---
-
+    // --- MOTORES E I2C ---
     function i2cWrite(reg: number, value: number): void {
         let buf = pins.createBuffer(2);
         buf[0] = reg;
@@ -102,69 +86,39 @@ namespace keyestudioRobot {
         }
     }
 
-
-    // --- LÓGICA INTERNA: DECODIFICADOR IR INDEPENDIENTE ---
-
+    // --- DECODIFICADOR IR INDEPENDIENTE SIMPLIFICADO ---
     const IR_REPEAT = 256;
     const IR_INCOMPLETE = 257;
     const IR_DATAGRAM = 258;
     const REPEAT_TIMEOUT_MS = 120;
 
-    interface IrState {
-        bitsReceived: number;
-        addressSectionBits: number;
-        commandSectionBits: number;
-        hiword: number;
-        loword: number;
-        activeCommand: number;
-        repeatTimeout: number;
-        onIrButtonPressed: IrButtonHandler[];
-        onIrButtonReleased: IrButtonHandler[];
-    }
+    let bitsReceived = 0;
+    let hiword = 0;
+    let loword = 0;
+    let commandSectionBits = 0;
+    let activeCommand = -1;
+    let repeatTimeout = 0;
 
-    class IrButtonHandler {
-        irButton: IrButton;
-        onEvent: () => void;
-        constructor(irButton: IrButton, onEvent: () => void) {
-            this.irButton = irButton;
-            this.onEvent = onEvent;
-        }
-    }
-
-    let irState: IrState = null;
-
-    function initIrState() {
-        if (irState) return;
-        irState = {
-            bitsReceived: 0,
-            addressSectionBits: 0,
-            commandSectionBits: 0,
-            hiword: 0,
-            loword: 0,
-            activeCommand: -1,
-            repeatTimeout: 0,
-            onIrButtonPressed: [],
-            onIrButtonReleased: []
-        };
-    }
+    let handlerPressed: () => void = null;
+    let handlerReleased: () => void = null;
+    let targetButton: number = -1;
 
     function appendBitToDatagram(bit: number): number {
-        irState.bitsReceived += 1;
-        if (irState.bitsReceived <= 8) {
-            irState.hiword = (irState.hiword << 1) + bit;
+        bitsReceived += 1;
+        if (bitsReceived <= 8) {
+            hiword = (hiword << 1) + bit;
             if (bit === 1) {
-                irState.bitsReceived = 9;
-                irState.hiword = 1;
+                bitsReceived = 9;
+                hiword = 1;
             }
-        } else if (irState.bitsReceived <= 16) {
-            irState.hiword = (irState.hiword << 1) + bit;
-        } else if (irState.bitsReceived <= 32) {
-            irState.loword = (irState.loword << 1) + bit;
+        } else if (bitsReceived <= 16) {
+            hiword = (hiword << 1) + bit;
+        } else if (bitsReceived <= 32) {
+            loword = (loword << 1) + bit;
         }
 
-        if (irState.bitsReceived === 32) {
-            irState.addressSectionBits = irState.hiword & 0xffff;
-            irState.commandSectionBits = irState.loword & 0xffff;
+        if (bitsReceived === 32) {
+            commandSectionBits = loword & 0xffff;
             return IR_DATAGRAM;
         } else {
             return IR_INCOMPLETE;
@@ -177,7 +131,7 @@ namespace keyestudioRobot {
         } else if (markAndSpace < 2700) {
             return appendBitToDatagram(1);
         }
-        irState.bitsReceived = 0;
+        bitsReceived = 0;
         if (markAndSpace < 12500) {
             return IR_REPEAT;
         } else if (markAndSpace < 14500) {
@@ -189,51 +143,42 @@ namespace keyestudioRobot {
 
     function handleIrEvent(irEvent: number) {
         if (irEvent === IR_DATAGRAM || irEvent === IR_REPEAT) {
-            irState.repeatTimeout = input.runningTime() + REPEAT_TIMEOUT_MS;
+            repeatTimeout = input.runningTime() + REPEAT_TIMEOUT_MS;
         }
 
         if (irEvent === IR_DATAGRAM) {
-            const newCommand = irState.commandSectionBits >> 8;
+            const newCommand = commandSectionBits >> 8;
 
-            if (newCommand !== irState.activeCommand) {
-                if (irState.activeCommand >= 0) {
-                    const releasedHandler = irState.onIrButtonReleased.find(h => h.irButton === irState.activeCommand || IrButton.Any === h.irButton);
-                    if (releasedHandler) {
-                        control.runInParallel(releasedHandler.onEvent);
+            if (newCommand !== activeCommand) {
+                if (activeCommand >= 0) {
+                    if ((targetButton === activeCommand || targetButton === -1) && handlerReleased) {
+                        control.inBackground(handlerReleased);
                     }
                 }
 
-                const pressedHandler = irState.onIrButtonPressed.find(h => h.irButton === newCommand || IrButton.Any === h.irButton);
-                if (pressedHandler) {
-                    control.runInParallel(pressedHandler.onEvent);
+                if ((targetButton === newCommand || targetButton === -1) && handlerPressed) {
+                    control.inBackground(handlerPressed);
                 }
-                irState.activeCommand = newCommand;
+                activeCommand = newCommand;
             }
         }
     }
 
     function notifyIrEvents() {
-        while (true) {
-            if (irState && irState.activeCommand !== -1) {
-                const now = input.runningTime();
-                if (now > irState.repeatTimeout) {
-                    const handler = irState.onIrButtonReleased.find(h => h.irButton === irState.activeCommand || IrButton.Any === h.irButton);
-                    if (handler) {
-                        control.runInParallel(handler.onEvent);
-                    }
-                    irState.bitsReceived = 0;
-                    irState.activeCommand = -1;
+        if (activeCommand !== -1) {
+            const now = input.runningTime();
+            if (now > repeatTimeout) {
+                if ((targetButton === activeCommand || targetButton === -1) && handlerReleased) {
+                    control.inBackground(handlerReleased);
                 }
+                bitsReceived = 0;
+                activeCommand = -1;
             }
-            basic.pause(REPEAT_TIMEOUT_MS);
         }
     }
 
-
-    // --- BLOQUES PÚBLICOS DE LA EXTENSIÓN (ESTILO MAKERBIT) ---
-
     /**
-     * Configura y conecta el receptor Infrarrojo físico en el pin asignado.
+     * Configura el receptor Infrarrojo en el pin asignado.
      */
     //% block="connect IR receiver at pin %pin"
     //% pin.fieldEditor="gridpicker"
@@ -242,7 +187,6 @@ namespace keyestudioRobot {
     //% pin.defl=DigitalPin.P16
     //% weight=90
     export function conectarIR(pin: DigitalPin): void {
-        initIrState();
         pins.setPull(pin, PinPullMode.PullNone);
         let mark = 0;
         let space = 0;
@@ -259,11 +203,13 @@ namespace keyestudioRobot {
             }
         });
 
-        control.runInParallel(notifyIrEvents);
+        loops.everyInterval(REPEAT_TIMEOUT_MS, function () {
+            notifyIrEvents();
+        });
     }
 
     /**
-     * Do something when a specific button is pressed or released on the remote control.
+     * Acción al presionar o soltar un botón del control remoto.
      */
     //% blockId=keyestudio_infrared_on_ir_button
     //% block="on IR button | %button | %action"
@@ -272,11 +218,11 @@ namespace keyestudioRobot {
     //% button.fieldOptions.tooltips="false"
     //% weight=85
     export function alRecepcionIR(button: IrButton, action: IrButtonAction, handler: () => void) {
-        initIrState();
+        targetButton = button;
         if (action === IrButtonAction.Pressed) {
-            irState.onIrButtonPressed.push(new IrButtonHandler(button, handler));
+            handlerPressed = handler;
         } else {
-            irState.onIrButtonReleased.push(new IrButtonHandler(button, handler));
+            handlerReleased = handler;
         }
     }
 
@@ -298,4 +244,3 @@ namespace keyestudioRobot {
         return Math.round(t / 58);
     }
 }
-
