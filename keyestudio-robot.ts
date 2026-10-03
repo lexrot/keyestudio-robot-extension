@@ -1,4 +1,3 @@
-// Enums para el control integrado de los LEDs RGB
 enum LED_L_R_Both {
     //% block="ambos LEDs"
     Both = 2,
@@ -38,7 +37,7 @@ enum IrButton {
     //% block="5"
     Number_5 = 0x18,
     //% block="6"
-    Number_6 = 0x7a,
+    Number_6 = 74,
     //% block="7"
     Number_7 = 0x10,
     //% block="8"
@@ -63,7 +62,6 @@ enum IrButtonAction {
 //% color="#AA278D" icon="\uf1b9" block="Keyestudio Robot"
 namespace keyestudioRobot {
 
-    // --- MOTORES E I2C ---
     function i2cWrite(reg: number, value: number): void {
         let buf = pins.createBuffer(2);
         buf[0] = reg;
@@ -74,10 +72,10 @@ namespace keyestudioRobot {
     /**
      * Mueve ambos motores usando coordenadas directas (-255 a 255).
      */
+    //% subcategory="Motors"
     //% block="Mover motor A $a motor B $b"
     //% a.min=-255 a.max=255 b.min=-255 b.max=255
     //% weight=100
-    //% group="Motors"
     export function Mover(a: number, b: number): void {
         if (a > 0) {
             i2cWrite(0x02, a); i2cWrite(0x01, 0);
@@ -96,52 +94,36 @@ namespace keyestudioRobot {
         }
     }
 
-    // --- NUEVO COMPONENTE DE LEDS POR CANTIDADES RGB ---
-
     /**
      * Define el color de los LEDs mezclando cantidades de R, G y B (0 a 255).
-     * @param place Selecciona qué LED encender (Izquierdo, Derecho o Ambos)
-     * @param r Cantidad de Rojo (0-255), eg: 255
-     * @param g Cantidad de Verde (0-255), eg: 0
-     * @param b Cantidad de Azul (0-255), eg: 0
      */
+    //% subcategory="RGB LED"
     //% block="Fijar color en %place | R $r G $g B $b"
     //% r.min=0 r.max=255 g.min=0 g.max=255 b.min=0 b.max=255
-    //% weight=75
-    //% group="RGB LED"
+    //% weight=90
     export function fijarRGB(place: LED_L_R_Both, r: number, g: number, b: number): void {
-        // En este chip I2C, el brillo máximo se logra enviando 0 y se apaga enviando 255.
-        // Invertimos el valor para que sea intuitivo (255 = Brillo máximo, 0 = Apagado).
         let valR = 255 - Math.clamp(0, 255, r);
         let valG = 255 - Math.clamp(0, 255, g);
         let valB = 255 - Math.clamp(0, 255, b);
 
-        // LED Derecho (Registros: R=0x08, G=0x07, B=0x06)
         if (place === LED_L_R_Both.LED_R || place === LED_L_R_Both.Both) {
-            i2cWrite(0x08, valR);
-            i2cWrite(0x07, valG);
-            i2cWrite(0x06, valB);
+            i2cWrite(0x08, valR); i2cWrite(0x07, valG); i2cWrite(0x06, valB);
         }
-        // LED Izquierdo (Registros: R=0x09, G=0x0a, B=0x05)
         if (place === LED_L_R_Both.LED_L || place === LED_L_R_Both.Both) {
-            i2cWrite(0x09, valR);
-            i2cWrite(0x0a, valG);
-            i2cWrite(0x05, valB);
+            i2cWrite(0x09, valR); i2cWrite(0x0a, valG); i2cWrite(0x05, valB);
         }
     }
 
     /**
      * Apaga por completo las luces LED RGB del chasis del coche.
      */
+    //% subcategory="RGB LED"
     //% block="LED OFF"
-    //% weight=72
-    //% group="RGB LED"
+    //% weight=80
     export function LED_OFF() {
         i2cWrite(0x08, 255); i2cWrite(0x07, 255); i2cWrite(0x06, 255);
         i2cWrite(0x09, 255); i2cWrite(0x0a, 255); i2cWrite(0x05, 255);
     }
-
-    // --- DECODIFICADOR IR ---
     const IR_REPEAT = 256;
     const IR_INCOMPLETE = 257;
     const IR_DATAGRAM = 258;
@@ -157,6 +139,26 @@ namespace keyestudioRobot {
     let handlerPressed: () => void = null;
     let handlerReleased: () => void = null;
     let targetButton: number = -1;
+
+    // Sistema de Password corregido usando un arreglo nativo
+    let digitosIngresados: number[] = [];
+    let okPresionado = false;
+
+    function traducirComandoANumero(cmd: number): number {
+        switch (cmd) {
+            case 0x4a: return 0;
+            case 0x68: return 1;
+            case 0x98: return 2;
+            case 0xb0: return 3;
+            case 0x30: return 4;
+            case 0x18: return 5;
+            case 0x7a: return 6;
+            case 0x10: return 7;
+            case 0x38: return 8;
+            case 0x5a: return 9;
+            default: return -99;
+        }
+    }
 
     function appendBitToDatagram(bit: number): number {
         bitsReceived += 1;
@@ -205,6 +207,15 @@ namespace keyestudioRobot {
             const newCommand = commandSectionBits >> 8;
 
             if (newCommand !== activeCommand) {
+                if (newCommand === 0x02) {
+                    okPresionado = true;
+                } else {
+                    let numPresionado = traducirComandoANumero(newCommand);
+                    if (numPresionado !== -99) {
+                        digitosIngresados.push(numPresionado);
+                    }
+                }
+
                 if (activeCommand >= 0) {
                     if ((targetButton === activeCommand || targetButton === -1) && handlerReleased) {
                         control.inBackground(handlerReleased);
@@ -235,13 +246,13 @@ namespace keyestudioRobot {
     /**
      * Configura el receptor Infrarrojo en el pin asignado.
      */
+    //% subcategory="IR Receiver"
     //% block="connect IR receiver at pin %pin"
     //% pin.fieldEditor="gridpicker"
     //% pin.fieldOptions.columns=4
     //% pin.fieldOptions.tooltips="false"
     //% pin.defl=DigitalPin.P16
     //% weight=90
-    //% group="IR Receiver"
     export function conectarIR(pin: DigitalPin): void {
         pins.setPull(pin, PinPullMode.PullNone);
         let mark = 0;
@@ -267,13 +278,13 @@ namespace keyestudioRobot {
     /**
      * Acción al presionar o soltar un botón del control remoto.
      */
+    //% subcategory="IR Receiver"
     //% blockId=keyestudio_infrared_on_ir_button
     //% block="on IR button | %button | %action"
     //% button.fieldEditor="gridpicker"
     //% button.fieldOptions.columns=3
     //% button.fieldOptions.tooltips="false"
     //% weight=85
-    //% group="IR Receiver"
     export function alRecepcionIR(button: IrButton, action: IrButtonAction, handler: () => void) {
         targetButton = button;
         if (action === IrButtonAction.Pressed) {
@@ -286,13 +297,13 @@ namespace keyestudioRobot {
     /**
      * Devuelve verdadero si el botón seleccionado se encuentra en el estado indicado.
      */
+    //% subcategory="IR Receiver"
     //% blockId=keyestudio_ir_button_is_pressed
     //% block="button %button | is %action"
     //% button.fieldEditor="gridpicker"
     //% button.fieldOptions.columns=3
     //% button.fieldOptions.tooltips="false"
     //% weight=84
-    //% group="IR Receiver"
     export function botonEstado(button: IrButton, action: IrButtonAction): boolean {
         if (activeCommand === -1) {
             return action === IrButtonAction.Released;
@@ -306,11 +317,54 @@ namespace keyestudioRobot {
     }
 
     /**
+     * Compara los números ingresados en el control con una contraseña. Devuelve True si es idéntica al presionar OK.
+     */
+    //% subcategory="IR Receiver"
+    //% blockId=keyestudio_password_check
+    //% block="password correct digits: $digit1 || $digit2 $digit3 $digit4 $digit5"
+    //% digit1.min=0 digit1.max=9
+    //% digit2.min=0 digit2.max=9
+    //% digit3.min=0 digit3.max=9
+    //% digit4.min=0 digit4.max=9
+    //% digit5.min=0 digit5.max=9
+    //% inlineInputMode=inline
+    //% weight=83
+    export function verificarPassword(digit1: number, digit2?: number, digit3?: number, digit4?: number, digit5?: number): boolean {
+        let claveEsperada: number[] = [];
+        if (digit1 !== undefined) claveEsperada.push(digit1);
+        if (digit2 !== undefined) claveEsperada.push(digit2);
+        if (digit3 !== undefined) claveEsperada.push(digit3);
+        if (digit4 !== undefined) claveEsperada.push(digit4);
+        if (digit5 !== undefined) claveEsperada.push(digit5);
+
+        if (okPresionado) {
+            okPresionado = false;
+
+            let esCorrecto = true;
+            if (digitosIngresados.length !== claveEsperada.length) {
+                esCorrecto = false;
+            } else {
+                for (let i = 0; i < claveEsperada.length; i++) {
+                    if (digitosIngresados[i] !== claveEsperada[i]) {
+                        esCorrecto = false;
+                        break;
+                    }
+                }
+            }
+
+            digitosIngresados = []; // Reiniciamos el almacenamiento para el próximo intento
+            return esCorrecto;
+        }
+
+        return false;
+    }
+
+    /**
      * Lectura directa del sensor de ultrasonido integrado (P14 y P15).
      */
+    //% subcategory="Ultrasonic"
     //% block="Distancia Ultrasonido (cm)"
     //% weight=80
-    //% group="Ultrasonic"
     export function distanciaUltrasonido(): number {
         pins.setPull(DigitalPin.P14, PinPullMode.PullNone);
         pins.digitalWritePin(DigitalPin.P14, 0);
