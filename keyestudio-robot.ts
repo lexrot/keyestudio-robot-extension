@@ -1,4 +1,13 @@
-// Enums nativos del control Keyestudio (Con espacios para la cuadrícula)
+// Enums para el control integrado de los LEDs RGB
+enum LED_L_R_Both {
+    //% block="ambos LEDs"
+    Both = 2,
+    //% block="LED Derecho"
+    LED_R = 1,
+    //% block="LED Izquierdo"
+    LED_L = 0
+}
+
 enum IrButton {
     //% block="any"
     Any = -1,
@@ -68,6 +77,7 @@ namespace keyestudioRobot {
     //% block="Mover motor A $a motor B $b"
     //% a.min=-255 a.max=255 b.min=-255 b.max=255
     //% weight=100
+    //% group="Motors"
     export function Mover(a: number, b: number): void {
         if (a > 0) {
             i2cWrite(0x02, a); i2cWrite(0x01, 0);
@@ -84,6 +94,51 @@ namespace keyestudioRobot {
         } else {
             i2cWrite(0x03, 0); i2cWrite(0x04, 0);
         }
+    }
+
+    // --- NUEVO COMPONENTE DE LEDS POR CANTIDADES RGB ---
+
+    /**
+     * Define el color de los LEDs mezclando cantidades de R, G y B (0 a 255).
+     * @param place Selecciona qué LED encender (Izquierdo, Derecho o Ambos)
+     * @param r Cantidad de Rojo (0-255), eg: 255
+     * @param g Cantidad de Verde (0-255), eg: 0
+     * @param b Cantidad de Azul (0-255), eg: 0
+     */
+    //% block="Fijar color en %place | R $r G $g B $b"
+    //% r.min=0 r.max=255 g.min=0 g.max=255 b.min=0 b.max=255
+    //% weight=75
+    //% group="RGB LED"
+    export function fijarRGB(place: LED_L_R_Both, r: number, g: number, b: number): void {
+        // En este chip I2C, el brillo máximo se logra enviando 0 y se apaga enviando 255.
+        // Invertimos el valor para que sea intuitivo (255 = Brillo máximo, 0 = Apagado).
+        let valR = 255 - Math.clamp(0, 255, r);
+        let valG = 255 - Math.clamp(0, 255, g);
+        let valB = 255 - Math.clamp(0, 255, b);
+
+        // LED Derecho (Registros: R=0x08, G=0x07, B=0x06)
+        if (place === LED_L_R_Both.LED_R || place === LED_L_R_Both.Both) {
+            i2cWrite(0x08, valR);
+            i2cWrite(0x07, valG);
+            i2cWrite(0x06, valB);
+        }
+        // LED Izquierdo (Registros: R=0x09, G=0x0a, B=0x05)
+        if (place === LED_L_R_Both.LED_L || place === LED_L_R_Both.Both) {
+            i2cWrite(0x09, valR);
+            i2cWrite(0x0a, valG);
+            i2cWrite(0x05, valB);
+        }
+    }
+
+    /**
+     * Apaga por completo las luces LED RGB del chasis del coche.
+     */
+    //% block="LED OFF"
+    //% weight=72
+    //% group="RGB LED"
+    export function LED_OFF() {
+        i2cWrite(0x08, 255); i2cWrite(0x07, 255); i2cWrite(0x06, 255);
+        i2cWrite(0x09, 255); i2cWrite(0x0a, 255); i2cWrite(0x05, 255);
     }
 
     // --- DECODIFICADOR IR ---
@@ -186,6 +241,7 @@ namespace keyestudioRobot {
     //% pin.fieldOptions.tooltips="false"
     //% pin.defl=DigitalPin.P16
     //% weight=90
+    //% group="IR Receiver"
     export function conectarIR(pin: DigitalPin): void {
         pins.setPull(pin, PinPullMode.PullNone);
         let mark = 0;
@@ -209,7 +265,7 @@ namespace keyestudioRobot {
     }
 
     /**
-     * Acción basada en eventos al presionar o soltar un botón del control remoto.
+     * Acción al presionar o soltar un botón del control remoto.
      */
     //% blockId=keyestudio_infrared_on_ir_button
     //% block="on IR button | %button | %action"
@@ -217,6 +273,7 @@ namespace keyestudioRobot {
     //% button.fieldOptions.columns=3
     //% button.fieldOptions.tooltips="false"
     //% weight=85
+    //% group="IR Receiver"
     export function alRecepcionIR(button: IrButton, action: IrButtonAction, handler: () => void) {
         targetButton = button;
         if (action === IrButtonAction.Pressed) {
@@ -227,8 +284,7 @@ namespace keyestudioRobot {
     }
 
     /**
-     * COMPONENTE LÓGICO NUEVO: Devuelve verdadero si el botón seleccionado se encuentra en el estado indicado.
-     * Ideal para usar directamente dentro de bloques "si ... entonces" (if).
+     * Devuelve verdadero si el botón seleccionado se encuentra en el estado indicado.
      */
     //% blockId=keyestudio_ir_button_is_pressed
     //% block="button %button | is %action"
@@ -236,15 +292,12 @@ namespace keyestudioRobot {
     //% button.fieldOptions.columns=3
     //% button.fieldOptions.tooltips="false"
     //% weight=84
+    //% group="IR Receiver"
     export function botonEstado(button: IrButton, action: IrButtonAction): boolean {
-        // Si el control no ha registrado comandos activos, asumimos que todos están sueltos (Released)
         if (activeCommand === -1) {
             return action === IrButtonAction.Released;
         }
-
-        // Evaluamos si el botón consultado coincide con el botón físico que está presionando el usuario
         let coincide = (button === activeCommand || button === IrButton.Any);
-
         if (action === IrButtonAction.Pressed) {
             return coincide;
         } else {
@@ -257,6 +310,7 @@ namespace keyestudioRobot {
      */
     //% block="Distancia Ultrasonido (cm)"
     //% weight=80
+    //% group="Ultrasonic"
     export function distanciaUltrasonido(): number {
         pins.setPull(DigitalPin.P14, PinPullMode.PullNone);
         pins.digitalWritePin(DigitalPin.P14, 0);
