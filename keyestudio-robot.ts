@@ -1,4 +1,4 @@
-// Enums nativos del control Keyestudio (Con espacios restaurados para la cuadrícula)
+// Enums nativos del control Keyestudio (Con espacios para la cuadrícula)
 enum IrButton {
     //% block="any"
     Any = -1,
@@ -86,7 +86,7 @@ namespace keyestudioRobot {
         }
     }
 
-    // --- DECODIFICADOR IR INDEPENDIENTE SIMPLIFICADO ---
+    // --- DECODIFICADOR IR ---
     const IR_REPEAT = 256;
     const IR_INCOMPLETE = 257;
     const IR_DATAGRAM = 258;
@@ -209,7 +209,7 @@ namespace keyestudioRobot {
     }
 
     /**
-     * Acción al presionar o soltar un botón del control remoto.
+     * Acción basada en eventos al presionar o soltar un botón del control remoto.
      */
     //% blockId=keyestudio_infrared_on_ir_button
     //% block="on IR button | %button | %action"
@@ -223,6 +223,32 @@ namespace keyestudioRobot {
             handlerPressed = handler;
         } else {
             handlerReleased = handler;
+        }
+    }
+
+    /**
+     * COMPONENTE LÓGICO NUEVO: Devuelve verdadero si el botón seleccionado se encuentra en el estado indicado.
+     * Ideal para usar directamente dentro de bloques "si ... entonces" (if).
+     */
+    //% blockId=keyestudio_ir_button_is_pressed
+    //% block="button %button | is %action"
+    //% button.fieldEditor="gridpicker"
+    //% button.fieldOptions.columns=3
+    //% button.fieldOptions.tooltips="false"
+    //% weight=84
+    export function botonEstado(button: IrButton, action: IrButtonAction): boolean {
+        // Si el control no ha registrado comandos activos, asumimos que todos están sueltos (Released)
+        if (activeCommand === -1) {
+            return action === IrButtonAction.Released;
+        }
+
+        // Evaluamos si el botón consultado coincide con el botón físico que está presionando el usuario
+        let coincide = (button === activeCommand || button === IrButton.Any);
+
+        if (action === IrButtonAction.Pressed) {
+            return coincide;
+        } else {
+            return !coincide;
         }
     }
 
