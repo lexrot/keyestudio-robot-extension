@@ -140,7 +140,6 @@ namespace keyestudioRobot {
     let handlerReleased: () => void = null;
     let targetButton: number = -1;
 
-    // Sistema de Password corregido usando un arreglo nativo
     let digitosIngresados: number[] = [];
     let okPresionado = false;
 
@@ -317,29 +316,30 @@ namespace keyestudioRobot {
     }
 
     /**
-     * Compara los números ingresados en el control con una contraseña. Devuelve True si es idéntica al presionar OK.
+     * Compara los números ingresados en el control con una contraseña de hasta 10 dígitos. Devuelve True si es idéntica al presionar OK.
      */
     //% subcategory="IR Receiver"
     //% blockId=keyestudio_password_check
-    //% block="password correct digits: $digit1 || $digit2 $digit3 $digit4 $digit5"
-    //% digit1.min=0 digit1.max=9
-    //% digit2.min=0 digit2.max=9
-    //% digit3.min=0 digit3.max=9
-    //% digit4.min=0 digit4.max=9
-    //% digit5.min=0 digit5.max=9
+    //% block="password correct digits: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
+    //% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
+    //% digit6.min=0 digit6.max=9 digit7.min=0 digit7.max=9 digit8.min=0 digit8.max=9 digit9.min=0 digit9.max=9 digit10.min=0 digit10.max=9
     //% inlineInputMode=inline
     //% weight=83
-    export function verificarPassword(digit1: number, digit2?: number, digit3?: number, digit4?: number, digit5?: number): boolean {
+    export function verificarPassword(digit1: number, digit2?: number, digit3?: number, digit4?: number, digit5?: number, digit6?: number, digit7?: number, digit8?: number, digit9?: number, digit10?: number): boolean {
         let claveEsperada: number[] = [];
         if (digit1 !== undefined) claveEsperada.push(digit1);
         if (digit2 !== undefined) claveEsperada.push(digit2);
         if (digit3 !== undefined) claveEsperada.push(digit3);
         if (digit4 !== undefined) claveEsperada.push(digit4);
         if (digit5 !== undefined) claveEsperada.push(digit5);
+        if (digit6 !== undefined) claveEsperada.push(digit6);
+        if (digit7 !== undefined) claveEsperada.push(digit7);
+        if (digit8 !== undefined) claveEsperada.push(digit8);
+        if (digit9 !== undefined) claveEsperada.push(digit9);
+        if (digit10 !== undefined) claveEsperada.push(digit10);
 
         if (okPresionado) {
             okPresionado = false;
-
             let esCorrecto = true;
             if (digitosIngresados.length !== claveEsperada.length) {
                 esCorrecto = false;
@@ -351,12 +351,29 @@ namespace keyestudioRobot {
                     }
                 }
             }
-
-            digitosIngresados = []; // Reiniciamos el almacenamiento para el próximo intento
+            digitosIngresados = [];
             return esCorrecto;
         }
-
         return false;
+    }
+
+    /**
+     * Pausa y congela la ejecución del programa hasta que el usuario digite la clave correcta (hasta 10 dígitos) y presione OK.
+     */
+    //% subcategory="IR Receiver"
+    //% blockId=keyestudio_password_pause
+    //% block="pause until password: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
+    //% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
+    //% digit6.min=0 digit6.max=9 digit7.min=0 digit7.max=9 digit8.min=0 digit8.max=9 digit9.min=0 digit9.max=9 digit10.min=0 digit10.max=9
+    //% inlineInputMode=inline
+    //% weight=82
+    export function pausaHastaPassword(digit1: number, digit2?: number, digit3?: number, digit4?: number, digit5?: number, digit6?: number, digit7?: number, digit8?: number, digit9?: number, digit10?: number): void {
+        while (true) {
+            if (verificarPassword(digit1, digit2, digit3, digit4, digit5, digit6, digit7, digit8, digit9, digit10)) {
+                break;
+            }
+            basic.pause(50);
+        }
     }
 
     /**
