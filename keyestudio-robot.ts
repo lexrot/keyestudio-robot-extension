@@ -115,35 +115,35 @@ namespace keyestudioRobot {
             i2cWrite(0x09, valR); i2cWrite(0x0a, valG); i2cWrite(0x05, valB);
         }
     }
-
-    /**
-     * Apaga por completo las luces LED RGB del chasis del coche.
-     */
-    //% block="LED OFF"
-    //% weight=80
-    //% group="RGB LED"
-    export function LED_OFF() {
-        i2cWrite(0x08, 255); i2cWrite(0x07, 255); i2cWrite(0x06, 255);
-        i2cWrite(0x09, 255); i2cWrite(0x0a, 255); i2cWrite(0x05, 255);
-    }
     const IR_REPEAT = 256;
     const IR_INCOMPLETE = 257;
     const IR_DATAGRAM = 258;
-    let bitsReceived = 0;
-    let hiword = 0;
-    let loword = 0;
-    let commandSectionBits = 0;
-    let activeCommand = -1;
-    let repeatTimeout = 0;
-    const REPEAT_TIMEOUT_MS = 140;
+    const REPEAT_TIMEOUT_MS = 120;
 
-    let handlerPressed: () => void = null;
-    let handlerReleased: () => void = null;
-    let targetButton: number = -1;
+    let irState: IrState = null;
 
-    let digitosIngresados: number[] = [];
-    let okPresionado = false;
-    let numeroPresionadoActual = -1;
+    interface IrState {
+        bitsReceived: number;
+        commandSectionBits: number;
+        hiword: number;
+        loword: number;
+        activeCommand: number;
+        repeatTimeout: number;
+        onIrButtonPressed: IrButtonHandler[];
+        onIrButtonReleased: IrButtonHandler[];
+        digitosIngresados: number[];
+        okPresionado: boolean;
+        numeroPresionadoActual: number;
+    }
+
+    class IrButtonHandler {
+        irButton: IrButton;
+        onEvent: () => void;
+        constructor(irButton: IrButton, onEvent: () => void) {
+            this.irButton = irButton;
+            this.onEvent = onEvent;
+        }
+    }
 
     function traducirComandoANumero(cmd: number): number {
         switch (cmd) {
@@ -162,24 +162,24 @@ namespace keyestudioRobot {
     }
 
     function appendBitToDatagram(bit: number): number {
-        bitsReceived += 1;
-        if (bitsReceived <= 8) {
-            hiword = (hiword << 1) + bit;
+        irState.bitsReceived += 1;
+        if (irState.bitsReceived <= 8) {
+            irState.hiword = (irState.hiword << 1) + bit;
             if (bit === 1) {
-                bitsReceived = 9;
-                hiword = 1;
+                irState.bitsReceived = 9;
+                irState.hiword = 1;
             }
-        } else if (bitsReceived <= 16) {
-            hiword = (hiword << 1) + bit;
-        } else if (bitsReceived <= 32) {
-            loword = (loword << 1) + bit;
+        } else if (irState.bitsReceived <= 16) {
+            irState.hiword = (irState.hiword << 1) + bit;
+        } else if (irState.bitsReceived <= 32) {
+            irState.loword = (irState.loword << 1) + bit;
         }
 
-        if (bitsReceived === 32) {
-            commandSectionBits = loword & 0xffff;
-            return 258;
+        if (irState.bitsReceived === 32) {
+            irState.commandSectionBits = irState.loword & 0xffff;
+            return IR_DATAGRAM;
         } else {
-            return 257;
+            return IR_INCOMPLETE;
         }
     }
 
@@ -189,67 +189,69 @@ namespace keyestudioRobot {
         } else if (markAndSpace < 2700) {
             return appendBitToDatagram(1);
         }
-        bitsReceived = 0;
+        irState.bitsReceived = 0;
         if (markAndSpace < 12500) {
-            return 256;
-        }
-        return 257;
-    }
-
-    function ejecutarHandlerSeguro(handler: () => void) {
-        if (handler) {
-            control.inBackground(handler);
+            return IR_REPEAT;
+        } else {
+            return IR_INCOMPLETE;
         }
     }
 
     function handleIrEvent(irEvent: number) {
-        let ahora = input.runningTime();
+        if (irEvent === IR_DATAGRAM || irEvent === IR_REPEAT) {
+            irState.repeatTimeout = input.runningTime() + REPEAT_TIMEOUT_MS;
+        }
 
-        if (irEvent === 258) {
-            let nuevoComando = commandSectionBits >> 8;
-            repeatTimeout = ahora + REPEAT_TIMEOUT_MS;
+        if (irEvent === IR_DATAGRAM) {
+            const newCommand = irState.commandSectionBits >> 8;
 
-            if (activeCommand >= 0 && nuevoComando !== activeCommand) {
-                if (targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) {
-                    ejecutarHandlerSeguro(handlerReleased);
-                }
-                activeCommand = -1;
-            }
-
-            if (nuevoComando !== activeCommand) {
-                if (nuevoComando === 0x02) {
-                    okPresionado = true;
-                } else {
-                    let num = traducirComandoANumero(nuevoComando);
-                    if (num !== -99) {
-                        digitosIngresados.push(num);
-                        numeroPresionadoActual = num;
+            if (newCommand !== irState.activeCommand) {
+                if (irState.activeCommand >= 0) {
+                    const releasedHandler = irState.onIrButtonReleased.find(h => h.irButton === irState.activeCommand || IrButton.Any === h.irButton || (IrButton.Num === h.irButton && traducirComandoANumero(irState.activeCommand) !== -99));
+                    if (releasedHandler) {
+                        control.inBackground(releasedHandler.onEvent);
                     }
                 }
 
-                activeCommand = nuevoComando;
-                if (targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) {
-                    ejecutarHandlerSeguro(handlerPressed);
+                if (newCommand === 0x02) {
+                    irState.okPresionado = true;
+                } else {
+                    let num = traducirComandoANumero(newCommand);
+                    if (num !== -99) {
+                        irState.digitosIngresados.push(num);
+                        irState.numeroPresionadoActual = num;
+                    }
                 }
+
+                const pressedHandler = irState.onIrButtonPressed.find(h => h.irButton === newCommand || IrButton.Any === h.irButton || (IrButton.Num === h.irButton && traducirComandoANumero(newCommand) !== -99));
+                if (pressedHandler) {
+                    control.inBackground(pressedHandler.onEvent);
+                }
+
+                irState.activeCommand = newCommand;
             }
-        } else if (irEvent === 256) {
-            repeatTimeout = ahora + REPEAT_TIMEOUT_MS;
         }
     }
 
-    function notifyIrEvents() {
-        if (activeCommand !== -1 && input.runningTime() > repeatTimeout) {
-            if (targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) {
-                ejecutarHandlerSeguro(handlerReleased);
-            }
-            bitsReceived = 0;
-            activeCommand = -1;
-            numeroPresionadoActual = -1;
-        }
+    function initIrState() {
+        if (irState) return;
+        irState = {
+            bitsReceived: 0,
+            commandSectionBits: 0,
+            hiword: 0,
+            loword: 0,
+            activeCommand: -1,
+            repeatTimeout: 0,
+            onIrButtonPressed: [],
+            onIrButtonReleased: [],
+            digitosIngresados: [],
+            okPresionado: false,
+            numeroPresionadoActual: -1
+        };
     }
 
     /**
-     * Configura el receptor Infrarrojo en el pin asignado de forma reactiva por hardware.
+     * Configura el receptor Infrarrojo en el pin asignado.
      */
     //% block="connect IR receiver at pin %pin"
     //% pin.fieldEditor="gridpicker"
@@ -259,6 +261,7 @@ namespace keyestudioRobot {
     //% weight=90
     //% group="IR Receiver"
     export function conectarIR(pin: DigitalPin): void {
+        initIrState();
         pins.setPull(pin, PinPullMode.PullNone);
         let mark = 0;
         let space = 0;
@@ -269,19 +272,36 @@ namespace keyestudioRobot {
 
         pins.onPulsed(pin, PulseValue.High, () => {
             space = pins.pulseDuration();
-            let status = decode(mark + space);
-            if (status !== 257) {
+            const status = decode(mark + space);
+            if (status !== IR_INCOMPLETE) {
                 handleIrEvent(status);
             }
         });
 
-        loops.everyInterval(30, function () {
+        loops.everyInterval(REPEAT_TIMEOUT_MS, function () {
             notifyIrEvents();
         });
     }
 
+    function notifyIrEvents() {
+        if (irState.activeCommand === -1) {
+            // skip
+        } else {
+            const now = input.runningTime();
+            if (now > irState.repeatTimeout) {
+                const handler = irState.onIrButtonReleased.find(h => h.irButton === irState.activeCommand || IrButton.Any === h.irButton || (IrButton.Num === h.irButton && traducirComandoANumero(irState.activeCommand) !== -99));
+                if (handler) {
+                    control.inBackground(handler.onEvent);
+                }
+                irState.bitsReceived = 0;
+                irState.activeCommand = -1;
+                irState.numeroPresionadoActual = -1;
+            }
+        }
+    }
+
     /**
-     * Acción basada en eventos limpios al presionar o soltar un botón del control remoto.
+     * Acción al presionar o soltar un botón del control remoto.
      */
     //% blockId=keyestudio_infrared_on_ir_button
     //% block="on IR button | %button | %action"
@@ -291,11 +311,11 @@ namespace keyestudioRobot {
     //% weight=85
     //% group="IR Receiver"
     export function alRecepcionIR(button: IrButton, action: IrButtonAction, handler: () => void) {
-        targetButton = button;
+        initIrState();
         if (action === IrButtonAction.Pressed) {
-            handlerPressed = handler;
+            irState.onIrButtonPressed.push(new IrButtonHandler(button, handler));
         } else {
-            handlerReleased = handler;
+            irState.onIrButtonReleased.push(new IrButtonHandler(button, handler));
         }
     }
 
@@ -310,11 +330,11 @@ namespace keyestudioRobot {
     //% weight=84
     //% group="IR Receiver"
     export function botonEstado(button: IrButton, action: IrButtonAction): boolean {
-        if (activeCommand === -1) {
+        if (!irState || irState.activeCommand === -1) {
             return action === IrButtonAction.Released;
         }
-        let esNumero = traducirComandoANumero(activeCommand) !== -99;
-        let coincide = (button === activeCommand || button === -1 || (button === -5 && esNumero));
+        let esNumero = traducirComandoANumero(irState.activeCommand) !== -99;
+        let coincide = (button === irState.activeCommand || button === IrButton.Any || (button === IrButton.Num && esNumero));
         if (action === IrButtonAction.Pressed) {
             return coincide;
         } else {
@@ -333,6 +353,7 @@ namespace keyestudioRobot {
     //% weight=83
     //% group="IR Receiver"
     export function verificarPassword(digit1: number, digit2?: number, digit3?: number, digit4?: number, digit5?: number, digit6?: number, digit7?: number, digit8?: number, digit9?: number, digit10?: number): boolean {
+        if (!irState) return false;
         let claveEsperada: number[] = [];
         if (digit1 !== undefined) claveEsperada.push(digit1);
         if (digit2 !== undefined) claveEsperada.push(digit2);
@@ -345,28 +366,27 @@ namespace keyestudioRobot {
         if (digit9 !== undefined) claveEsperada.push(digit9);
         if (digit10 !== undefined) claveEsperada.push(digit10);
 
-        if (okPresionado) {
-            okPresionado = false;
+        if (irState.okPresionado) {
+            irState.okPresionado = false;
             let esCorrecto = true;
-            if (digitosIngresados.length !== claveEsperada.length) {
+            if (irState.digitosIngresados.length !== claveEsperada.length) {
                 esCorrecto = false;
             } else {
                 for (let i = 0; i < claveEsperada.length; i++) {
-                    if (digitosIngresados[i] !== claveEsperada[i]) {
+                    if (irState.digitosIngresados[i] !== claveEsperada[i]) {
                         esCorrecto = false;
                         break;
                     }
                 }
             }
-            digitosIngresados = [];
+            irState.digitosIngresados = [];
             return esCorrecto;
         }
         return false;
     }
-
     /**
-     * Pausa y congela la ejecución del programa hasta que el usuario digite la clave correcta (hasta 10 dígitos) y presione OK.
-     */
+    * Pausa y congela la ejecución del programa hasta que el usuario digite la clave correcta (hasta 10 dígitos) y presione OK.
+    */
     //% blockId=keyestudio_password_pause
     //% block="pause until password: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
     //% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
@@ -382,15 +402,14 @@ namespace keyestudioRobot {
             basic.pause(50);
         }
     }
-
     /**
-     * Devuelve el número de tipo entero (0-9) que está siendo presionado en este instante, o -1 si no hay ningún número activo.
-     */
+    * Devuelve el número de tipo entero (0-9) que está siendo presionado en este instante, o -1 si no hay ningún número activo.
+    */
     //% block="last pressed digit"
     //% weight=81
     //% group="IR Receiver"
     export function ultimoDigitoPresionado(): number {
-        return numeroPresionadoActual;
+        return irState ? irState.numeroPresionadoActual : -1;
     }
     /**
     * Compara un número entero de manera directa (ingresado como int) y devuelve verdadero si se cumple la acción.
@@ -401,10 +420,10 @@ namespace keyestudioRobot {
     //% weight=80
     //% group="IR Receiver"
     export function numeroEnteroEstado(num: number, action: IrButtonAction): boolean {
-        if (activeCommand === -1) {
+        if (!irState || irState.activeCommand === -1) {
             return action === IrButtonAction.Released;
         }
-        let numActual = traducirComandoANumero(activeCommand);
+        let numActual = traducirComandoANumero(irState.activeCommand);
         let coincide = (numActual === num);
         if (action === IrButtonAction.Pressed) {
             return coincide;
