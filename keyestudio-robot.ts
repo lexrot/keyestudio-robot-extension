@@ -1,4 +1,3 @@
-// Enums optimizados con cuadrícula y alineación clásica para el control remoto
 enum LED_L_R_Both {
     //% block="ambos LEDs"
     Both = 2,
@@ -11,12 +10,10 @@ enum LED_L_R_Both {
 enum IrButton {
     //% block="any"
     Any = -1,
-    //% block="num"
-    Num = -5,
     //% block="▲"
     Up = 0x62,
-    //% block=" "
-    Unused_2 = -2,
+    //% block="num"
+    Num = -5,
     //% block="◀"
     Left = 0x22,
     //% block="OK"
@@ -65,7 +62,6 @@ enum IrButtonAction {
 //% color="#AA278D" icon="\uf1b9" block="Keyestudio Robot"
 namespace keyestudioRobot {
 
-    // --- COMUNICACIÓN MOTOR BAJO NIVEL (I2C) ---
     function i2cWrite(reg: number, value: number): void {
         let buf = pins.createBuffer(2);
         buf[0] = reg;
@@ -128,8 +124,9 @@ namespace keyestudioRobot {
         i2cWrite(0x08, 255); i2cWrite(0x07, 255); i2cWrite(0x06, 255);
         i2cWrite(0x09, 255); i2cWrite(0x0a, 255); i2cWrite(0x05, 255);
     }
-
-    // --- DECODIFICADOR REACTIVO ULTRA-PRECISO IR ---
+    const IR_REPEAT = 256;
+    const IR_INCOMPLETE = 257;
+    const IR_DATAGRAM = 258;
     let bitsReceived = 0;
     let hiword = 0;
     let loword = 0;
@@ -178,9 +175,9 @@ namespace keyestudioRobot {
 
         if (bitsReceived === 32) {
             commandSectionBits = loword & 0xffff;
-            return 258; // Datagrama completo
+            return 258;
         } else {
-            return 257; // Incompleto
+            return 257;
         }
     }
 
@@ -192,7 +189,7 @@ namespace keyestudioRobot {
         }
         bitsReceived = 0;
         if (markAndSpace < 12500) {
-            return 256; // Comando repetido (botón mantenido)
+            return 256;
         }
         return 257;
     }
@@ -206,19 +203,18 @@ namespace keyestudioRobot {
     function handleIrEvent(irEvent: number) {
         let ahora = input.runningTime();
 
-        if (irEvent === 258) { // Nuevo código recibido
+        if (irEvent === 258) {
             let nuevoComando = commandSectionBits >> 8;
             repeatTimeout = ahora + REPEAT_TIMEOUT_MS;
 
-            if (nuevoComando !== activeCommand) {
-                // Dispara liberación del botón anterior si existía
-                if (activeCommand >= 0) {
-                    if (targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) {
-                        ejecutarHandlerSeguro(handlerReleased);
-                    }
+            if (activeCommand >= 0 && nuevoComando !== activeCommand) {
+                if (targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) {
+                    ejecutarHandlerSeguro(handlerReleased);
                 }
+                activeCommand = -1;
+            }
 
-                // Registra datos lógicos de contraseñas y números enteros
+            if (nuevoComando !== activeCommand) {
                 if (nuevoComando === 0x02) {
                     okPresionado = true;
                 } else {
@@ -229,14 +225,24 @@ namespace keyestudioRobot {
                     }
                 }
 
-                // Dispara pulsación del nuevo botón
                 activeCommand = nuevoComando;
                 if (targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) {
                     ejecutarHandlerSeguro(handlerPressed);
                 }
             }
-        } else if (irEvent === 256) { // El usuario mantiene el botón apretado
+        } else if (irEvent === 256) {
             repeatTimeout = ahora + REPEAT_TIMEOUT_MS;
+        }
+    }
+
+    function notifyIrEvents() {
+        if (activeCommand !== -1 && input.runningTime() > repeatTimeout) {
+            if (targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) {
+                ejecutarHandlerSeguro(handlerReleased);
+            }
+            bitsReceived = 0;
+            activeCommand = -1;
+            numeroPresionadoActual = -1;
         }
     }
 
@@ -267,19 +273,8 @@ namespace keyestudioRobot {
             }
         });
 
-        // Hilo guardián: Verifica si el usuario soltó el botón por tiempo de ausencia de ráfaga IR
-        control.inBackground(function () {
-            while (true) {
-                if (activeCommand !== -1 && input.runningTime() > repeatTimeout) {
-                    if (targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) {
-                        ejecutarHandlerSeguro(handlerReleased);
-                    }
-                    bitsReceived = 0;
-                    activeCommand = -1;
-                    numeroPresionadoActual = -1;
-                }
-                basic.pause(30);
-            }
+        loops.everyInterval(30, function () {
+            notifyIrEvents();
         });
     }
 
@@ -324,9 +319,10 @@ namespace keyestudioRobot {
             return !coincide;
         }
     }
+
     /**
-    * Compara los números ingresados en el control con una contraseña de hasta 10 dígitos. Devuelve True si es idéntica al presionar OK.
-    */
+     * Compara los números ingresados en el control con una contraseña de hasta 10 dígitos. Devuelve True si es idéntica al presionar OK.
+     */
     //% blockId=keyestudio_password_check
     //% block="password correct digits: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
     //% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
@@ -346,6 +342,7 @@ namespace keyestudioRobot {
         if (digit8 !== undefined) claveEsperada.push(digit8);
         if (digit9 !== undefined) claveEsperada.push(digit9);
         if (digit10 !== undefined) claveEsperada.push(digit10);
+
         if (okPresionado) {
             okPresionado = false;
             let esCorrecto = true;
@@ -364,9 +361,10 @@ namespace keyestudioRobot {
         }
         return false;
     }
+
     /**
-    * Pausa y congela la ejecución del programa hasta que el usuario digite la clave correcta (hasta 10 dígitos) y presione OK.
-    */
+     * Pausa y congela la ejecución del programa hasta que el usuario digite la clave correcta (hasta 10 dígitos) y presione OK.
+     */
     //% blockId=keyestudio_password_pause
     //% block="pause until password: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
     //% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
@@ -382,18 +380,20 @@ namespace keyestudioRobot {
             basic.pause(50);
         }
     }
+
     /**
-    * Devuelve el número de tipo entero (0-9) que está siendo presionado en este instante, o -1 si no hay ningún número activo.
-    */
+     * Devuelve el número de tipo entero (0-9) que está siendo presionado en este instante, o -1 si no hay ningún número activo.
+     */
     //% block="last pressed digit"
     //% weight=81
     //% group="IR Receiver"
     export function ultimoDigitoPresionado(): number {
         return numeroPresionadoActual;
     }
+
     /**
-    * Compara un número entero de manera directa (ingresado como int) y devuelve verdadero si se cumple la acción.
-    */
+     * Compara un número entero de manera directa (ingresado como int) y devuelve verdadero si se cumple la acción.
+     */
     //% blockId=keyestudio_int_number_check
     //% block="number $num | is $action"
     //% num.min=0 num.max=9
@@ -411,9 +411,10 @@ namespace keyestudioRobot {
             return !coincide;
         }
     }
+
     /**
-    * Lectura directa del sensor de ultrasonido integrado (P14 y P15).
-    */
+     * Lectura directa del sensor de ultrasonido integrado (P14 y P15).
+     */
     //% block="Distancia Ultrasonido (cm)"
     //% weight=80
     //% group="Ultrasonic"
@@ -429,3 +430,4 @@ namespace keyestudioRobot {
         return Math.round(t / 58);
     }
 }
+
