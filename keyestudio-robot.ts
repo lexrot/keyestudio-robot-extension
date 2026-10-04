@@ -12,8 +12,8 @@ enum IrButton {
     Any = -1,
     //% block="▲"
     Up = 0x62,
-    //% block=" "
-    Unused_2 = -2,
+    //% block="num"
+    Num = -5,
     //% block="◀"
     Left = 0x22,
     //% block="OK"
@@ -124,7 +124,6 @@ namespace keyestudioRobot {
         i2cWrite(0x08, 255); i2cWrite(0x07, 255); i2cWrite(0x06, 255);
         i2cWrite(0x09, 255); i2cWrite(0x0a, 255); i2cWrite(0x05, 255);
     }
-
     const IR_REPEAT = 256;
     const IR_INCOMPLETE = 257;
     const IR_DATAGRAM = 258;
@@ -143,6 +142,8 @@ namespace keyestudioRobot {
 
     let digitosIngresados: number[] = [];
     let okPresionado = false;
+
+    let numeroPresionadoActual = -1;
 
     function traducirComandoANumero(cmd: number): number {
         switch (cmd) {
@@ -213,16 +214,17 @@ namespace keyestudioRobot {
                     let numPresionado = traducirComandoANumero(newCommand);
                     if (numPresionado !== -99) {
                         digitosIngresados.push(numPresionado);
+                        numeroPresionadoActual = numPresionado;
                     }
                 }
 
                 if (activeCommand >= 0) {
-                    if ((targetButton === activeCommand || targetButton === -1) && handlerReleased) {
+                    if ((targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) && handlerReleased) {
                         control.inBackground(handlerReleased);
                     }
                 }
 
-                if ((targetButton === newCommand || targetButton === -1) && handlerPressed) {
+                if ((targetButton === newCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(newCommand) !== -99)) && handlerPressed) {
                     control.inBackground(handlerPressed);
                 }
                 activeCommand = newCommand;
@@ -234,11 +236,12 @@ namespace keyestudioRobot {
         if (activeCommand !== -1) {
             const now = input.runningTime();
             if (now > repeatTimeout) {
-                if ((targetButton === activeCommand || targetButton === -1) && handlerReleased) {
+                if ((targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) && handlerReleased) {
                     control.inBackground(handlerReleased);
                 }
                 bitsReceived = 0;
                 activeCommand = -1;
+                numeroPresionadoActual = -1;
             }
         }
     }
@@ -308,7 +311,8 @@ namespace keyestudioRobot {
         if (activeCommand === -1) {
             return action === IrButtonAction.Released;
         }
-        let coincide = (button === activeCommand || button === IrButton.Any);
+        let esNumero = traducirComandoANumero(activeCommand) !== -99;
+        let coincide = (button === activeCommand || button === IrButton.Any || (button === IrButton.Num && esNumero));
         if (action === IrButtonAction.Pressed) {
             return coincide;
         } else {
@@ -378,8 +382,37 @@ namespace keyestudioRobot {
     }
 
     /**
-     * Lectura directa del sensor de ultrasonido integrado (P14 y P15).
+     * Devuelve el número de tipo entero (0-9) que está siendo presionado en este instante, o -1 si no hay ningún número activo.
      */
+    //% block="last pressed digit"
+    //% weight=81
+    //% group="IR Receiver"
+    export function ultimoDigitoPresionado(): number {
+        return numeroPresionadoActual;
+    }
+    /**
+    * Compara un número entero de manera directa (ingresado como int) y devuelve verdadero si se cumple la acción.
+    */
+    //% blockId=keyestudio_int_number_check
+    //% block="number $num | is $action"
+    //% num.min=0 num.max=9
+    //% weight=80
+    //% group="IR Receiver"
+    export function numeroEnteroEstado(num: number, action: IrButtonAction): boolean {
+        if (activeCommand === -1) {
+            return action === IrButtonAction.Released;
+        }
+        let numActual = traducirComandoANumero(activeCommand);
+        let coincide = (numActual === num);
+        if (action === IrButtonAction.Pressed) {
+            return coincide;
+        } else {
+            return !coincide;
+        }
+    }
+    /**
+    * Lectura directa del sensor de ultrasonido integrado (P14 y P15).
+    */
     //% block="Distancia Ultrasonido (cm)"
     //% weight=80
     //% group="Ultrasonic"
@@ -390,7 +423,6 @@ namespace keyestudioRobot {
         pins.digitalWritePin(DigitalPin.P14, 1);
         control.waitMicros(10);
         pins.digitalWritePin(DigitalPin.P14, 0);
-
         let t = pins.pulseIn(DigitalPin.P15, PulseValue.High, 35000);
         if (t == 0) return 400;
         return Math.round(t / 58);
