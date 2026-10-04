@@ -10,10 +10,12 @@ enum LED_L_R_Both {
 enum IrButton {
     //% block="any"
     Any = -1,
-    //% block="▲"
-    Up = 0x62,
     //% block="num"
     Num = -5,
+    //% block="▲"
+    Up = 0x62,
+    //% block=" "
+    Unused_2 = -2,
     //% block="◀"
     Left = 0x22,
     //% block="OK"
@@ -390,10 +392,9 @@ namespace keyestudioRobot {
     export function ultimoDigitoPresionado(): number {
         return numeroPresionadoActual;
     }
-
     /**
-     * Compara un número entero de manera directa (ingresado como int) y devuelve verdadero si se cumple la acción.
-     */
+    * Compara un número entero de manera directa (ingresado como int) y devuelve verdadero si se cumple la acción.
+    */
     //% blockId=keyestudio_int_number_check
     //% block="number $num | is $action"
     //% num.min=0 num.max=9
@@ -411,10 +412,9 @@ namespace keyestudioRobot {
             return !coincide;
         }
     }
-
     /**
-     * Lectura directa del sensor de ultrasonido integrado (P14 y P15).
-     */
+    * Lectura directa del sensor de ultrasonido integrado (P14 y P15).
+    */
     //% block="Distancia Ultrasonido (cm)"
     //% weight=80
     //% group="Ultrasonic"
@@ -430,4 +430,3 @@ namespace keyestudioRobot {
         return Math.round(t / 58);
     }
 }
-
