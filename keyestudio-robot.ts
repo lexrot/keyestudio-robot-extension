@@ -72,10 +72,10 @@ namespace keyestudioRobot {
     /**
      * Mueve ambos motores usando coordenadas directas (-255 a 255).
      */
-    //% subcategory="Motors"
     //% block="Mover motor A $a motor B $b"
     //% a.min=-255 a.max=255 b.min=-255 b.max=255
     //% weight=100
+    //% group="Motors"
     export function Mover(a: number, b: number): void {
         if (a > 0) {
             i2cWrite(0x02, a); i2cWrite(0x01, 0);
@@ -97,10 +97,10 @@ namespace keyestudioRobot {
     /**
      * Define el color de los LEDs mezclando cantidades de R, G y B (0 a 255).
      */
-    //% subcategory="RGB LED"
     //% block="Fijar color en %place | R $r G $g B $b"
     //% r.min=0 r.max=255 g.min=0 g.max=255 b.min=0 b.max=255
     //% weight=90
+    //% group="RGB LED"
     export function fijarRGB(place: LED_L_R_Both, r: number, g: number, b: number): void {
         let valR = 255 - Math.clamp(0, 255, r);
         let valG = 255 - Math.clamp(0, 255, g);
@@ -117,13 +117,14 @@ namespace keyestudioRobot {
     /**
      * Apaga por completo las luces LED RGB del chasis del coche.
      */
-    //% subcategory="RGB LED"
     //% block="LED OFF"
     //% weight=80
+    //% group="RGB LED"
     export function LED_OFF() {
         i2cWrite(0x08, 255); i2cWrite(0x07, 255); i2cWrite(0x06, 255);
         i2cWrite(0x09, 255); i2cWrite(0x0a, 255); i2cWrite(0x05, 255);
     }
+
     const IR_REPEAT = 256;
     const IR_INCOMPLETE = 257;
     const IR_DATAGRAM = 258;
@@ -245,13 +246,13 @@ namespace keyestudioRobot {
     /**
      * Configura el receptor Infrarrojo en el pin asignado.
      */
-    //% subcategory="IR Receiver"
     //% block="connect IR receiver at pin %pin"
     //% pin.fieldEditor="gridpicker"
     //% pin.fieldOptions.columns=4
     //% pin.fieldOptions.tooltips="false"
     //% pin.defl=DigitalPin.P16
     //% weight=90
+    //% group="IR Receiver"
     export function conectarIR(pin: DigitalPin): void {
         pins.setPull(pin, PinPullMode.PullNone);
         let mark = 0;
@@ -277,13 +278,13 @@ namespace keyestudioRobot {
     /**
      * Acción al presionar o soltar un botón del control remoto.
      */
-    //% subcategory="IR Receiver"
     //% blockId=keyestudio_infrared_on_ir_button
     //% block="on IR button | %button | %action"
     //% button.fieldEditor="gridpicker"
     //% button.fieldOptions.columns=3
     //% button.fieldOptions.tooltips="false"
     //% weight=85
+    //% group="IR Receiver"
     export function alRecepcionIR(button: IrButton, action: IrButtonAction, handler: () => void) {
         targetButton = button;
         if (action === IrButtonAction.Pressed) {
@@ -296,13 +297,13 @@ namespace keyestudioRobot {
     /**
      * Devuelve verdadero si el botón seleccionado se encuentra en el estado indicado.
      */
-    //% subcategory="IR Receiver"
     //% blockId=keyestudio_ir_button_is_pressed
     //% block="button %button | is %action"
     //% button.fieldEditor="gridpicker"
     //% button.fieldOptions.columns=3
     //% button.fieldOptions.tooltips="false"
     //% weight=84
+    //% group="IR Receiver"
     export function botonEstado(button: IrButton, action: IrButtonAction): boolean {
         if (activeCommand === -1) {
             return action === IrButtonAction.Released;
@@ -318,13 +319,13 @@ namespace keyestudioRobot {
     /**
      * Compara los números ingresados en el control con una contraseña de hasta 10 dígitos. Devuelve True si es idéntica al presionar OK.
      */
-    //% subcategory="IR Receiver"
     //% blockId=keyestudio_password_check
     //% block="password correct digits: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
     //% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
     //% digit6.min=0 digit6.max=9 digit7.min=0 digit7.max=9 digit8.min=0 digit8.max=9 digit9.min=0 digit9.max=9 digit10.min=0 digit10.max=9
     //% inlineInputMode=inline
     //% weight=83
+    //% group="IR Receiver"
     export function verificarPassword(digit1: number, digit2?: number, digit3?: number, digit4?: number, digit5?: number, digit6?: number, digit7?: number, digit8?: number, digit9?: number, digit10?: number): boolean {
         let claveEsperada: number[] = [];
         if (digit1 !== undefined) claveEsperada.push(digit1);
@@ -360,13 +361,13 @@ namespace keyestudioRobot {
     /**
      * Pausa y congela la ejecución del programa hasta que el usuario digite la clave correcta (hasta 10 dígitos) y presione OK.
      */
-    //% subcategory="IR Receiver"
     //% blockId=keyestudio_password_pause
     //% block="pause until password: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
     //% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
     //% digit6.min=0 digit6.max=9 digit7.min=0 digit7.max=9 digit8.min=0 digit8.max=9 digit9.min=0 digit9.max=9 digit10.min=0 digit10.max=9
     //% inlineInputMode=inline
     //% weight=82
+    //% group="IR Receiver"
     export function pausaHastaPassword(digit1: number, digit2?: number, digit3?: number, digit4?: number, digit5?: number, digit6?: number, digit7?: number, digit8?: number, digit9?: number, digit10?: number): void {
         while (true) {
             if (verificarPassword(digit1, digit2, digit3, digit4, digit5, digit6, digit7, digit8, digit9, digit10)) {
@@ -379,9 +380,9 @@ namespace keyestudioRobot {
     /**
      * Lectura directa del sensor de ultrasonido integrado (P14 y P15).
      */
-    //% subcategory="Ultrasonic"
     //% block="Distancia Ultrasonido (cm)"
     //% weight=80
+    //% group="Ultrasonic"
     export function distanciaUltrasonido(): number {
         pins.setPull(DigitalPin.P14, PinPullMode.PullNone);
         pins.digitalWritePin(DigitalPin.P14, 0);
