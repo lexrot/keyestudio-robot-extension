@@ -1,3 +1,4 @@
+// Enums optimizados con cuadrícula y alineación clásica para el control remoto
 enum LED_L_R_Both {
     //% block="ambos LEDs"
     Both = 2,
@@ -10,10 +11,12 @@ enum LED_L_R_Both {
 enum IrButton {
     //% block="any"
     Any = -1,
-    //% block="▲"
-    Up = 0x62,
     //% block="num"
     Num = -5,
+    //% block="▲"
+    Up = 0x62,
+    //% block=" "
+    Unused_2 = -2,
     //% block="◀"
     Left = 0x22,
     //% block="OK"
@@ -62,6 +65,7 @@ enum IrButtonAction {
 //% color="#AA278D" icon="\uf1b9" block="Keyestudio Robot"
 namespace keyestudioRobot {
 
+    // --- COMUNICACIÓN MOTOR BAJO NIVEL (I2C) ---
     function i2cWrite(reg: number, value: number): void {
         let buf = pins.createBuffer(2);
         buf[0] = reg;
@@ -124,17 +128,15 @@ namespace keyestudioRobot {
         i2cWrite(0x08, 255); i2cWrite(0x07, 255); i2cWrite(0x06, 255);
         i2cWrite(0x09, 255); i2cWrite(0x0a, 255); i2cWrite(0x05, 255);
     }
-    const IR_REPEAT = 256;
-    const IR_INCOMPLETE = 257;
-    const IR_DATAGRAM = 258;
-    const REPEAT_TIMEOUT_MS = 120;
 
+    // --- DECODIFICADOR REACTIVO ULTRA-PRECISO IR ---
     let bitsReceived = 0;
     let hiword = 0;
     let loword = 0;
     let commandSectionBits = 0;
     let activeCommand = -1;
     let repeatTimeout = 0;
+    const REPEAT_TIMEOUT_MS = 140;
 
     let handlerPressed: () => void = null;
     let handlerReleased: () => void = null;
@@ -142,7 +144,6 @@ namespace keyestudioRobot {
 
     let digitosIngresados: number[] = [];
     let okPresionado = false;
-
     let numeroPresionadoActual = -1;
 
     function traducirComandoANumero(cmd: number): number {
@@ -177,9 +178,9 @@ namespace keyestudioRobot {
 
         if (bitsReceived === 32) {
             commandSectionBits = loword & 0xffff;
-            return IR_DATAGRAM;
+            return 258; // Datagrama completo
         } else {
-            return IR_INCOMPLETE;
+            return 257; // Incompleto
         }
     }
 
@@ -191,63 +192,56 @@ namespace keyestudioRobot {
         }
         bitsReceived = 0;
         if (markAndSpace < 12500) {
-            return IR_REPEAT;
-        } else if (markAndSpace < 14500) {
-            return IR_INCOMPLETE;
-        } else {
-            return IR_INCOMPLETE;
+            return 256; // Comando repetido (botón mantenido)
+        }
+        return 257;
+    }
+
+    function ejecutarHandlerSeguro(handler: () => void) {
+        if (handler) {
+            control.inBackground(handler);
         }
     }
 
     function handleIrEvent(irEvent: number) {
-        if (irEvent === IR_DATAGRAM || irEvent === IR_REPEAT) {
-            repeatTimeout = input.runningTime() + REPEAT_TIMEOUT_MS;
-        }
+        let ahora = input.runningTime();
 
-        if (irEvent === IR_DATAGRAM) {
-            const newCommand = commandSectionBits >> 8;
+        if (irEvent === 258) { // Nuevo código recibido
+            let nuevoComando = commandSectionBits >> 8;
+            repeatTimeout = ahora + REPEAT_TIMEOUT_MS;
 
-            if (newCommand !== activeCommand) {
-                if (newCommand === 0x02) {
+            if (nuevoComando !== activeCommand) {
+                // Dispara liberación del botón anterior si existía
+                if (activeCommand >= 0) {
+                    if (targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) {
+                        ejecutarHandlerSeguro(handlerReleased);
+                    }
+                }
+
+                // Registra datos lógicos de contraseñas y números enteros
+                if (nuevoComando === 0x02) {
                     okPresionado = true;
                 } else {
-                    let numPresionado = traducirComandoANumero(newCommand);
-                    if (numPresionado !== -99) {
-                        digitosIngresados.push(numPresionado);
-                        numeroPresionadoActual = numPresionado;
+                    let num = traducirComandoANumero(nuevoComando);
+                    if (num !== -99) {
+                        digitosIngresados.push(num);
+                        numeroPresionadoActual = num;
                     }
                 }
 
-                if (activeCommand >= 0) {
-                    if ((targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) && handlerReleased) {
-                        control.inBackground(handlerReleased);
-                    }
+                // Dispara pulsación del nuevo botón
+                activeCommand = nuevoComando;
+                if (targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) {
+                    ejecutarHandlerSeguro(handlerPressed);
                 }
-
-                if ((targetButton === newCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(newCommand) !== -99)) && handlerPressed) {
-                    control.inBackground(handlerPressed);
-                }
-                activeCommand = newCommand;
             }
-        }
-    }
-
-    function notifyIrEvents() {
-        if (activeCommand !== -1) {
-            const now = input.runningTime();
-            if (now > repeatTimeout) {
-                if ((targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) && handlerReleased) {
-                    control.inBackground(handlerReleased);
-                }
-                bitsReceived = 0;
-                activeCommand = -1;
-                numeroPresionadoActual = -1;
-            }
+        } else if (irEvent === 256) { // El usuario mantiene el botón apretado
+            repeatTimeout = ahora + REPEAT_TIMEOUT_MS;
         }
     }
 
     /**
-     * Configura el receptor Infrarrojo en el pin asignado.
+     * Configura el receptor Infrarrojo en el pin asignado de forma reactiva por hardware.
      */
     //% block="connect IR receiver at pin %pin"
     //% pin.fieldEditor="gridpicker"
@@ -267,19 +261,30 @@ namespace keyestudioRobot {
 
         pins.onPulsed(pin, PulseValue.High, () => {
             space = pins.pulseDuration();
-            const status = decode(mark + space);
-            if (status !== IR_INCOMPLETE) {
+            let status = decode(mark + space);
+            if (status !== 257) {
                 handleIrEvent(status);
             }
         });
 
-        loops.everyInterval(REPEAT_TIMEOUT_MS, function () {
-            notifyIrEvents();
+        // Hilo guardián: Verifica si el usuario soltó el botón por tiempo de ausencia de ráfaga IR
+        control.inBackground(function () {
+            while (true) {
+                if (activeCommand !== -1 && input.runningTime() > repeatTimeout) {
+                    if (targetButton === activeCommand || targetButton === -1 || (targetButton === -5 && traducirComandoANumero(activeCommand) !== -99)) {
+                        ejecutarHandlerSeguro(handlerReleased);
+                    }
+                    bitsReceived = 0;
+                    activeCommand = -1;
+                    numeroPresionadoActual = -1;
+                }
+                basic.pause(30);
+            }
         });
     }
 
     /**
-     * Acción al presionar o soltar un botón del control remoto.
+     * Acción basada en eventos limpios al presionar o soltar un botón del control remoto.
      */
     //% blockId=keyestudio_infrared_on_ir_button
     //% block="on IR button | %button | %action"
@@ -312,17 +317,16 @@ namespace keyestudioRobot {
             return action === IrButtonAction.Released;
         }
         let esNumero = traducirComandoANumero(activeCommand) !== -99;
-        let coincide = (button === activeCommand || button === IrButton.Any || (button === IrButton.Num && esNumero));
+        let coincide = (button === activeCommand || button === -1 || (button === -5 && esNumero));
         if (action === IrButtonAction.Pressed) {
             return coincide;
         } else {
             return !coincide;
         }
     }
-
     /**
-     * Compara los números ingresados en el control con una contraseña de hasta 10 dígitos. Devuelve True si es idéntica al presionar OK.
-     */
+    * Compara los números ingresados en el control con una contraseña de hasta 10 dígitos. Devuelve True si es idéntica al presionar OK.
+    */
     //% blockId=keyestudio_password_check
     //% block="password correct digits: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
     //% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
@@ -342,7 +346,6 @@ namespace keyestudioRobot {
         if (digit8 !== undefined) claveEsperada.push(digit8);
         if (digit9 !== undefined) claveEsperada.push(digit9);
         if (digit10 !== undefined) claveEsperada.push(digit10);
-
         if (okPresionado) {
             okPresionado = false;
             let esCorrecto = true;
@@ -361,10 +364,9 @@ namespace keyestudioRobot {
         }
         return false;
     }
-
     /**
-     * Pausa y congela la ejecución del programa hasta que el usuario digite la clave correcta (hasta 10 dígitos) y presione OK.
-     */
+    * Pausa y congela la ejecución del programa hasta que el usuario digite la clave correcta (hasta 10 dígitos) y presione OK.
+    */
     //% blockId=keyestudio_password_pause
     //% block="pause until password: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
     //% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
@@ -380,10 +382,9 @@ namespace keyestudioRobot {
             basic.pause(50);
         }
     }
-
     /**
-     * Devuelve el número de tipo entero (0-9) que está siendo presionado en este instante, o -1 si no hay ningún número activo.
-     */
+    * Devuelve el número de tipo entero (0-9) que está siendo presionado en este instante, o -1 si no hay ningún número activo.
+    */
     //% block="last pressed digit"
     //% weight=81
     //% group="IR Receiver"
