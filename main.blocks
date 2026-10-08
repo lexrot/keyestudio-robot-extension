@@ -1,1 +1,1 @@
-<xml xmlns="https://developers.google.com/blockly/xml"><variables></variables><block type="pxt-on-start" id="`[0MJ67H=!m-3gMCEzZs" x="0" y="0"></block><block type="keyestudioRobot_lineSensorState" id="x(m#z=?b;zoP;oX|f@iA" disabled-reasons="pxt_automatic_disabled" x="143" y="540"><field name="sensor">LineSensor.Left</field><field name="color">LineColor.Black</field></block></xml>
+<xml xmlns="https://developers.google.com/blockly/xml"><variables></variables><block type="pxt-on-start" id="Bv.^umz?0S=O5c*5$6!-" x="0" y="0"></block></xml>
