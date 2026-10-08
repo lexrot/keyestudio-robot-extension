@@ -10,12 +10,10 @@ enum LED_L_R_Both {
 enum IrButton {
     //% block="any"
     Any = -1,
-    //% block="num"
-    Num = -5,
     //% block="▲"
     Up = 0x62,
-    //% block=" "
-    Unused_2 = -2,
+    //% block="num"
+    Num = -5,
     //% block="◀"
     Left = 0x22,
     //% block="OK"
