@@ -75,12 +75,21 @@ enum LineColor {
     White = 0
 }
 
+enum ConfirmButton {
+    //% block="OK"
+    Ok = 0x02,
+    //% block="#"
+    Hash = 0x52,
+    //% block="*"
+    Star = 0x42
+}
+
 //% color="#AA278D" icon="\uf1b9" block="Keyestudio Robot"
 namespace keyestudioRobot {
 
     function i2cWrite(reg: number, value: number): void {
         let buf = pins.createBuffer(2);
-        buf[0] = reg;
+        buf[0] = reg;    
         buf[1] = value;
         pins.i2cWriteBuffer(0x30, buf);
     }
@@ -141,52 +150,6 @@ namespace keyestudioRobot {
         i2cWrite(0x09, 255); i2cWrite(0x0a, 255); i2cWrite(0x05, 255);
     }
 
-    // --- SECCIÓN: IR MEMORY ---
-    export let IR_memory: number[] = [];
-
-    /**
-     * Agrega un número al final de la lista IR memory.
-     */
-    //% block="IR memory agregar número $value"
-    //% weight=78
-    //% group="IR Memory"
-    export function irMemoryAgregar(value: number): void {
-        IR_memory.push(value);
-    }
-
-    /**
-     * Devuelve el tamaño o cantidad de elementos en IR memory.
-     */
-    //% block="IR memory longitud"
-    //% weight=77
-    //% group="IR Memory"
-    export function irMemoryLongitud(): number {
-        return IR_memory.length;
-    }
-
-    /**
-     * Obtiene el número guardado en una posición específica de la lista (empezando en 0).
-     */
-    //% block="IR memory obtener valor en posición $index"
-    //% weight=76
-    //% group="IR Memory"
-    export function irMemoryObtener(index: number): number {
-        if (index >= 0 && index < IR_memory.length) {
-            return IR_memory[index];
-        }
-        return -1;
-    }
-
-    /**
-     * Vacía por completo la lista IR memory.
-     */
-    //% block="IR memory vaciar lista"
-    //% weight=75
-    //% group="IR Memory"
-    export function irMemoryVaciar(): void {
-        IR_memory = [];
-    }
-
     // --- SECCIÓN: SENSORES SEGUIDORES DE LÍNEA ---
 
     /**
@@ -221,6 +184,7 @@ namespace keyestudioRobot {
         digitosIngresados: number[];
         okPresionado: boolean;
         numeroPresionadoActual: number;
+        lastConditionAction: number; 
     }
 
     class IrButtonHandler {
@@ -252,7 +216,7 @@ namespace keyestudioRobot {
         irState.bitsReceived += 1;
         if (irState.bitsReceived <= 8) {
             irState.hiword = (irState.hiword << 1) + bit;
-            if (bit === 1) {
+            if (bit === 1) { 
                 irState.bitsReceived = 9;
                 irState.hiword = 1;
             }
@@ -310,6 +274,8 @@ namespace keyestudioRobot {
                     }
                 }
 
+                irState.lastConditionAction = newCommand;
+
                 const pressedHandler = irState.onIrButtonPressed.find(h => h.irButton === newCommand || IrButton.Any === h.irButton || (IrButton.Num === h.irButton && traducirComandoANumero(newCommand) !== -99));
                 if (pressedHandler) {
                     control.inBackground(pressedHandler.onEvent);
@@ -333,13 +299,14 @@ namespace keyestudioRobot {
             onIrButtonReleased: [],
             digitosIngresados: [],
             okPresionado: false,
-            numeroPresionadoActual: -1
+            numeroPresionadoActual: -1,
+            lastConditionAction: -1
         };
     }
 
-/**
- * Configura el receptor Infrarrojo en el pin asignado.
- */
+    /**
+     * Configura el receptor Infrarrojo en el pin asignado.
+     */
     //% block="connect IR receiver at pin %pin"
     //% pin.fieldEditor="gridpicker"
     //% pin.fieldOptions.columns=4
@@ -352,9 +319,11 @@ namespace keyestudioRobot {
         pins.setPull(pin, PinPullMode.PullNone);
         let mark = 0;
         let space = 0;
+
         pins.onPulsed(pin, PulseValue.Low, () => {
             mark = pins.pulseDuration();
         });
+
         pins.onPulsed(pin, PulseValue.High, () => {
             space = pins.pulseDuration();
             const status = decode(mark + space);
@@ -362,169 +331,212 @@ namespace keyestudioRobot {
                 handleIrEvent(status);
             }
         });
+
         loops.everyInterval(REPEAT_TIMEOUT_MS, function () {
             notifyIrEvents();
         });
     }
+
     function notifyIrEvents() {
         if (irState.activeCommand === -1) {
             // skip
         } else {
             const now = input.runningTime();
-            if (now > irState.repeatTimeout) {
-                const handler = irState.onIrButtonReleased.find(h => h.irButton === irState.activeCommand || IrButton.Any === h.irButton || (IrButton.Num === h.irButton && traducirComandoANumero(irState.activeCommand) !== -99));
-                if (handler) {
-                    control.inBackground(handler.onEvent);
-                }
-                irState.bitsReceived = 0;
-                irState.activeCommand = -1;
-                irState.numeroPresionadoActual = -1;
-            }
-        }
-    }
-    /**
-    * Acción al presionar o soltar un botón del control remoto.
-    */
-    //% blockId=keyestudio_infrared_on_ir_button
-    //% block="on IR button | %button | %action"
-    //% button.fieldEditor="gridpicker"
-    //% button.fieldOptions.columns=3
-    //% button.fieldOptions.tooltips="false"
-    //% weight=85
-    //% group="IR Receiver"
-    export function alRecepcionIR(button: IrButton, action: IrButtonAction, handler: () => void) {
-        initIrState();
-        if (action === IrButtonAction.Pressed) {
-            irState.onIrButtonPressed.push(new IrButtonHandler(button, handler));
-        } else {
-            irState.onIrButtonReleased.push(new IrButtonHandler(button, handler));
-        }
-    }
-    /**
-    * Devuelve verdadero si el botón seleccionado se encuentra en el estado indicado.
-    */
-    //% blockId=keyestudio_ir_button_is_pressed
-    //% block="button %button | is %action"
-    //% button.fieldEditor="gridpicker"
-    //% button.fieldOptions.columns=3
-    //% button.fieldOptions.tooltips="false"
-    //% weight=84
-    //% group="IR Receiver"
-    export function botonEstado(button: IrButton, action: IrButtonAction): boolean {
-        if (!irState || irState.activeCommand === -1) {
-            return action === IrButtonAction.Released;
-        }
-        let esNumero = traducirComandoANumero(irState.activeCommand) !== -99;
-        let coincide = (button === irState.activeCommand || button === IrButton.Any || (button === IrButton.Num && esNumero));
-        if (action === IrButtonAction.Pressed) {
-            return coincide;
-        } else {
-            return !coincide;
-        }
-    }
-    /**
-    * Compara los números ingresados en el control con una contraseña de hasta 10 dígitos. Devuelve True si es idéntica al presionar OK.
-    */
-    //% blockId=keyestudio_password_check
-    //% block="password correct digits: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
-    //% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
-    //% digit6.min=0 digit6.max=9 digit7.min=0 digit7.max=9 digit8.min=0 digit8.max=9 digit9.min=0 digit9.max=9 digit10.min=0 digit10.max=9
-    //% inlineInputMode=inline
-    //% weight=83
-    //% group="IR Receiver"
-    export function verificarPassword(digit1: number, digit2?: number, digit3?: number, digit4?: number, digit5?: number, digit6?: number, digit7?: number, digit8?: number, digit9?: number, digit10?: number): boolean {
-        if (!irState) return false;
-        let claveEsperada: number[] = [];
-        if (digit1 !== undefined) claveEsperada.push(digit1);
-        if (digit2 !== undefined) claveEsperada.push(digit2);
-        if (digit3 !== undefined) claveEsperada.push(digit3);
-        if (digit4 !== undefined) claveEsperada.push(digit4);
-        if (digit5 !== undefined) claveEsperada.push(digit5);
-        if (digit6 !== undefined) claveEsperada.push(digit6);
-        if (digit7 !== undefined) claveEsperada.push(digit7);
-        if (digit8 !== undefined) claveEsperada.push(digit8);
-        if (digit9 !== undefined) claveEsperada.push(digit9);
-        if (digit10 !== undefined) claveEsperada.push(digit10);
-        if (irState.okPresionado) {
-            irState.okPresionado = false;
-            let esCorrecto = true;
-            if (irState.digitosIngresados.length !== claveEsperada.length) {
-                esCorrecto = false;
-            } else {
-                for (let i = 0; i < claveEsperada.length; i++) {
-                    if (irState.digitosIngresados[i] !== claveEsperada[i]) {
-                        esCorrecto = false;
-                        break;
-                    }
-                }
-            }
-            irState.digitosIngresados = [];
-            return esCorrecto;
-        }
-        return false;
-    }
-    /**
-    * Pausa y congela la ejecución del programa hasta que el usuario digite la clave correcta (hasta 10 dígitos) y presione OK.
-    */
-    //% blockId=keyestudio_password_pause
-    //% block="pause until password: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
-    //% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
-    //% digit6.min=0 digit6.max=9 digit7.min=0 digit7.max=9 digit8.min=0 digit8.max=9 digit9.min=0 digit9.max=9 digit10.min=0 digit10.max=9
-    //% inlineInputMode=inline
-    //% weight=82
-    //% group="IR Receiver"
-    export function pausaHastaPassword(digit1: number, digit2?: number, digit3?: number, digit4?: number, digit5?: number, digit6?: number, digit7?: number, digit8?: number, digit9?: number, digit10?: number): void {
-        while (true) {
-            if (verificarPassword(digit1, digit2, digit3, digit4, digit5, digit6, digit7, digit8, digit9, digit10)) {
-                break;
-            }
-            basic.pause(50);
-        }
-    }
-    /**
-    * Devuelve el número de tipo entero (0-9) que está siendo presionado en este instante, o -1 si no hay ningún número activo.
-    */
-    //% block="last pressed digit"
-    //% weight=81
-    //% group="IR Receiver"
-    export function ultimoDigitoPresionado(): number {
-        return irState ? irState.numeroPresionadoActual : -1;
-    }
-    /**
-    * Compara un número entero de manera directa (ingresado como int) y devuelve verdadero si se cumple la acción.
-    */
-    //% blockId=keyestudio_int_number_check
-    //% block="number $num | is $action"
-    //% num.min=0 num.max=9
-    //% weight=80
-    //% group="IR Receiver"
-    export function numeroEnteroEstado(num: number, action: IrButtonAction): boolean {
-        if (!irState || irState.activeCommand === -1) {
-            return action === IrButtonAction.Released;
-        }
-        let numActual = traducirComandoANumero(irState.activeCommand);
-        let coincide = (numActual === num);
-        if (action === IrButtonAction.Pressed) {
-            return coincide;
-        } else {
-            return !coincide;
-        }
-    }
-    /**
-    * Lectura directa del sensor de ultrasonido integrado (P14 y P15).
-    */
-    //% block="Distancia Ultrasonido (cm)"
-    //% weight=60
-    //% group="Ultrasonic"
-    export function distanciaUltrasonido(): number {
-        pins.setPull(DigitalPin.P14, PinPullMode.PullNone);
-        pins.digitalWritePin(DigitalPin.P14, 0);
-        control.waitMicros(2);
-        pins.digitalWritePin(DigitalPin.P14, 1);
-        control.waitMicros(10);
-        pins.digitalWritePin(DigitalPin.P14, 0);
-        let t = pins.pulseIn(DigitalPin.P15, PulseValue.High, 35000);
-        if (t == 0) return 400;
-        return Math.round(t / 58);
-    }
+if (now > irState.repeatTimeout) {
+const handler = irState.onIrButtonReleased.find(h => h.irButton === irState.activeCommand || IrButton.Any === h.irButton || (IrButton.Num === h.irButton && traducirComandoANumero(irState.activeCommand) !== -99));
+if (handler) {
+control.inBackground(handler.onEvent);
+}
+irState.bitsReceived = 0;
+irState.activeCommand = -1;
+irState.numeroPresionadoActual = -1;
+}
+}
+}
+/**
+* Acción al presionar o soltar un botón del control remoto.
+*/
+//% blockId=keyestudio_infrared_on_ir_button
+//% block="on IR button | %button | %action"
+//% button.fieldEditor="gridpicker"
+//% button.fieldOptions.columns=3
+//% button.fieldOptions.tooltips="false"
+//% weight=85
+//% group="IR Receiver"
+export function alRecepcionIR(button: IrButton, action: IrButtonAction, handler: () => void) {
+initIrState();
+if (action === IrButtonAction.Pressed) {
+irState.onIrButtonPressed.push(new IrButtonHandler(button, handler));
+} else {
+irState.onIrButtonReleased.push(new IrButtonHandler(button, handler));
+}
+}
+/**
+* Devuelve verdadero si el botón seleccionado se encuentra en el estado indicado.
+*/
+//% blockId=keyestudio_ir_button_is_pressed
+//% block="button %button | is %action"
+//% button.fieldEditor="gridpicker"
+//% button.fieldOptions.columns=3
+//% button.fieldOptions.tooltips="false"
+//% weight=84
+//% group="IR Receiver"
+export function botonEstado(button: IrButton, action: IrButtonAction): boolean {
+if (!irState || irState.activeCommand === -1) {
+return action === IrButtonAction.Released;
+}
+let esNumero = traducirComandoANumero(irState.activeCommand) !== -99;
+let coincide = (button === irState.activeCommand || button === IrButton.Any || (button === IrButton.Num && esNumero));
+if (action === IrButtonAction.Pressed) {
+return coincide;
+} else {
+return !coincide;
+}
+}
+/**
+* Compara los números ingresados en el control con una contraseña de hasta 10 dígitos. Devuelve True si es idéntica al presionar OK.
+*/
+//% blockId=keyestudio_password_check
+//% block="password correct digits: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
+//% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
+//% digit6.min=0 digit6.max=9 digit7.min=0 digit7.max=9 digit8.min=0 digit8.max=9 digit9.min=0 digit9.max=9 digit10.min=0 digit10.max=9
+//% inlineInputMode=inline
+//% weight=83
+//% group="IR Receiver"
+export function verificarPassword(digit1: number, digit2?: number, digit3?: number, digit4?: number, digit5?: number, digit6?: number, digit7?: number, digit8?: number, digit9?: number, digit10?: number): boolean {
+if (!irState) return false;
+let claveEsperada: number[] = [];
+if (digit1 !== undefined) claveEsperada.push(digit1);
+if (digit2 !== undefined) claveEsperada.push(digit2);
+if (digit3 !== undefined) claveEsperada.push(digit3);
+if (digit4 !== undefined) claveEsperada.push(digit4);
+if (digit5 !== undefined) claveEsperada.push(digit5);
+if (digit6 !== undefined) claveEsperada.push(digit6);
+if (digit7 !== undefined) claveEsperada.push(digit7);
+if (digit8 !== undefined) claveEsperada.push(digit8);
+if (digit9 !== undefined) claveEsperada.push(digit9);
+if (digit10 !== undefined) claveEsperada.push(digit10);
+if (irState.okPresionado) {
+irState.okPresionado = false;
+let esCorrecto = true;
+if (irState.digitosIngresados.length !== claveEsperada.length) {
+esCorrecto = false;
+} else {
+for (let i = 0; i < claveEsperada.length; i++) {
+if (irState.digitosIngresados[i] !== claveEsperada[i]) {
+esCorrecto = false;
+break;
+}
+}
+}
+irState.digitosIngresados = [];
+return esCorrecto;
+}
+return false;
+}
+/**
+* Pausa y congela la ejecución del programa hasta que el usuario digite la clave correcta (hasta 10 dígitos) y presione OK.
+*/
+//% blockId=keyestudio_password_pause
+//% block="pause until password: $digit1 || $digit2 $digit3 $digit4 $digit5 $digit6 $digit7 $digit8 $digit9 $digit10"
+//% digit1.min=0 digit1.max=9 digit2.min=0 digit2.max=9 digit3.min=0 digit3.max=9 digit4.min=0 digit4.max=9 digit5.min=0 digit5.max=9
+//% digit6.min=0 digit6.max=9 digit7.min=0 digit7.max=9 digit8.min=0 digit8.max=9 digit9.min=0 digit9.max=9 digit10.min=0 digit10.max=9
+//% inlineInputMode=inline
+//% weight=82
+//% group="IR Receiver"
+export function pausaHastaPassword(digit1: number, digit2?: number, digit3?: number, digit4?: number, digit5?: number, digit6?: number, digit7?: number, digit8?: number, digit9?: number, digit10?: number): void {
+while (true) {
+if (verificarPassword(digit1, digit2, digit3, digit4, digit5, digit6, digit7, digit8, digit9, digit10)) {
+break;
+}
+basic.pause(50);
+}
+}
+/**
+* Devuelve el número de tipo entero (0-9) que está siendo presionado en este instante, o -1 si no hay ningún número activo.
+*/
+//% block="last pressed digit"
+//% weight=81
+//% group="IR Receiver"
+export function ultimoDigitoPresionado(): number {
+return irState ? irState.numeroPresionadoActual : -1;
+}
+/**
+* Compara un número entero de manera directa (ingresado como int) y devuelve verdadero si se cumple la acción.
+*/
+//% blockId=keyestudio_int_number_check
+//% block="number $num | is $action"
+//% num.min=0 num.max=9
+//% weight=80
+//% group="IR Receiver"
+export function numeroEnteroEstado(num: number, action: IrButtonAction): boolean {
+if (!irState || irState.activeCommand === -1) {
+return action === IrButtonAction.Released;
+}
+let numActual = traducirComandoANumero(irState.activeCommand);
+let coincide = (numActual === num);
+if (action === IrButtonAction.Pressed) {
+return coincide;
+} else {
+return !coincide;
+}
+}
+/**
+* Captura una entrada de número deteniendo el hilo hasta confirmar con OK, # o * y con límite opcional de dígitos máximos.
+*/
+//% blockId=keyestudio_number_input_advanced
+//% block="read number with confirmation %btn || maximal digits $maxDigits"
+//% maxDigits.defl=0
+//% inlineInputMode=inline
+//% weight=79
+//% group="IR Receiver"
+export function capturarNumeroAvanzado(btn: ConfirmButton, maxDigits?: number): number {
+initIrState();
+let resultado = 0;
+let digitosContados = 0;
+let limiteDigitos = (maxDigits !== undefined && maxDigits > 0) ? maxDigits : 9999;
+irState.lastConditionAction = -1;
+while (true) {
+if (irState.lastConditionAction === btn) {
+break;
+}
+if (digitosContados >= limiteDigitos) {
+break;
+}
+let ultimoCmd = irState.activeCommand;
+if (ultimoCmd >= 0 && ultimoCmd !== btn) {
+let numPresionado = traducirComandoANumero(ultimoCmd);
+if (numPresionado !== -99) {
+resultado = (resultado * 10) + numPresionado;
+digitosContados++;
+while (irState.activeCommand === ultimoCmd) {
+basic.pause(10);
+}
+}
+}
+basic.pause(10);
+}
+while (irState.activeCommand === btn) {
+basic.pause(10);
+}
+irState.lastConditionAction = -1;
+return resultado;
+}
+/**
+* Lectura directa del sensor de ultrasonido integrado (P14 y P15).
+*/
+//% block="Distancia Ultrasonido (cm)"
+//% weight=60
+//% group="Ultrasonic"
+export function distanciaUltrasonido(): number {
+pins.setPull(DigitalPin.P14, PinPullMode.PullNone);
+pins.digitalWritePin(DigitalPin.P14, 0);
+control.waitMicros(2);
+pins.digitalWritePin(DigitalPin.P14, 1);
+control.waitMicros(10);
+pins.digitalWritePin(DigitalPin.P14, 0);
+let t = pins.pulseIn(DigitalPin.P15, PulseValue.High, 35000);
+if (t == 0) return 400;
+return Math.round(t / 58);
+}
 }
